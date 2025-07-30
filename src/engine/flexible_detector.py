@@ -24,6 +24,7 @@ class FlexibleSignalDetector:
     }
     
     def __init__(self, strategy_config: Dict, token_tracker: TokenAgeTracker):
+        self.strategy_config = strategy_config  # Store full config
         self.conditions = strategy_config.get('conditions', {})
         self.token_tracker = token_tracker
         self.strategy_name = strategy_config.get('name', 'Unknown')
@@ -95,6 +96,7 @@ class FlexibleSignalDetector:
                     'metrics': self._calculate_metrics(list(window), pool_state),
                     'strategy': self.strategy_name,
                     'strategy_id': self.strategy_id,
+                    'strategy_config': self.strategy_config,
                     'conditions_met': self._get_met_conditions(list(window), pool_state)
                 }
                 signals.append(signal)
@@ -109,7 +111,12 @@ class FlexibleSignalDetector:
         
     def _get_window_seconds(self) -> int:
         """Get window size from conditions"""
-        # Check volume window first
+        # Check custom condition first (for v1.2 recipe)
+        custom_config = self.conditions.get('custom', {})
+        if custom_config.get('enabled') and custom_config.get('slice_duration'):
+            return custom_config['slice_duration']
+            
+        # Check volume window
         vol_window = self.conditions.get('volume_window', {})
         if vol_window.get('enabled') and vol_window.get('window_seconds'):
             return vol_window['window_seconds']
@@ -204,7 +211,8 @@ class FlexibleSignalDetector:
             self._check_large_buys(window_txs),
             self._check_buy_pressure(window_txs),
             self._check_unique_wallets(window_txs),
-            self._check_price_change(pool_state)
+            self._check_price_change(pool_state),
+            self._check_custom_condition(window_txs, pool_state, token_address)
         ]
         
         # All enabled conditions must pass
@@ -355,5 +363,28 @@ class FlexibleSignalDetector:
             met_conditions.append('buy_pressure')
         if self._check_unique_wallets(window_txs):
             met_conditions.append('unique_wallets')
+        if self._check_custom_condition(window_txs, pool_state, None):
+            met_conditions.append('custom')
             
         return met_conditions
+        
+    def _check_custom_condition(self, window_txs: List[Dict], pool_state: Dict, token_address: str) -> bool:
+        """Check custom conditions like MC band big buys"""
+        
+        custom_config = self.conditions.get('custom', {})
+        if not custom_config.get('enabled', False):
+            return True
+            
+        condition_type = custom_config.get('type')
+        
+        if condition_type == 'mc_band_big_buys':
+            # Import the v1.2 recipe logic
+            from src.strategies.backtest_recipe_v12 import BacktestRecipeV12
+            recipe = BacktestRecipeV12()
+            
+            market_cap = pool_state.get('market_cap', 0)
+            return recipe.check_big_buy_conditions(window_txs, market_cap)
+            
+        # Add other custom condition types here
+        
+        return True

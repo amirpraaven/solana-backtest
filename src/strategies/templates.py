@@ -186,6 +186,41 @@ STRATEGY_TEMPLATES = {
                 "unit": "USD"
             }
         }
+    },
+    
+    "backtest_recipe_v12": {
+        "name": "Backtest Recipe v1.2",
+        "description": "MC band-based strategy with 5-minute slices and ladder exits",
+        "conditions": {
+            "token_age": {
+                "enabled": True,
+                "operator": "less_than_equal",
+                "value": 30,
+                "unit": "days"
+            },
+            "custom": {
+                "enabled": True,
+                "type": "mc_band_big_buys",
+                "slice_duration": 300,  # 5 minutes
+                "mc_bands": [
+                    [100000, 300, 1500],      # <= $100k: $300+ buys, $1.5k total
+                    [400000, 1000, 5000],     # <= $400k: $1k+ buys, $5k total (min 5 buys)
+                    [1000000, 2000, 10000],   # <= $1m: $2k-$4k buys, $10k total
+                    [2000000, 4000, 20000]    # <= $2m: $4k-$12k buys, $20k total
+                ]
+            }
+        },
+        "entry": {
+            "type": "fixed_sol",
+            "amount": 1.0  # Buy 1 SOL worth
+        },
+        "exit": {
+            "type": "ladder",
+            "targets": [
+                [2.0, 0.3],   # At 2x: sell to lock 70% profit
+                [7.0, 0.5]    # At 7x: sell 50% of remainder
+            ]
+        }
     }
 }
 

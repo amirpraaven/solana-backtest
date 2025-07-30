@@ -48,7 +48,9 @@ class BacktestEngine:
             'hold_duration': 300,     # 5 minutes default hold
             'exit_strategy': 'time_based',  # time_based, stop_loss_take_profit, trailing_stop
             'execution_delay': 2,     # 2 seconds execution delay
-            'max_concurrent_positions': 10
+            'max_concurrent_positions': 10,
+            'default_sol_price': 100, # Default SOL price if not available
+            'default_position_size': 1000  # Default position size in USD
         }
         
         if config:
@@ -389,16 +391,28 @@ class BacktestEngine:
             return None
             
         # Calculate position size (respecting max % of pool)
-        position_size = min(
-            1000,  # Default $1000 position
-            liquidity * self.config['max_position_size']
-        )
+        # Check if strategy has custom entry configuration
+        strategy_config = signal.get('strategy_config', {})
+        entry_config = strategy_config.get('entry', {})
+        
+        if entry_config.get('type') == 'fixed_sol':
+            # Fixed SOL amount entry (for v1.2 recipe)
+            sol_amount = entry_config.get('amount', 1.0)
+            sol_price = signal['pool_state'].get('sol_price', self.config['default_sol_price'])
+            position_size = sol_amount * sol_price
+        else:
+            # Default position sizing
+            position_size = min(
+                self.config.get('default_position_size', 1000),
+                liquidity * self.config['max_position_size']
+            )
         
         # Determine exit
         exit_time, exit_price, exit_reason = await self._determine_exit(
             entry_time,
             entry_price,
-            price_data
+            price_data,
+            strategy_config
         )
         
         if not exit_price:
@@ -435,10 +449,23 @@ class BacktestEngine:
         self,
         entry_time: datetime,
         entry_price: float,
-        price_data: Dict[datetime, float]
+        price_data: Dict[datetime, float],
+        strategy_config: Dict = None
     ) -> Tuple[datetime, float, str]:
         """Determine exit time and price based on strategy"""
         
+        # Check for strategy-specific exit config
+        if strategy_config and 'exit' in strategy_config:
+            exit_config = strategy_config['exit']
+            if exit_config.get('type') == 'ladder':
+                return await self._ladder_exit(
+                    entry_time, 
+                    entry_price, 
+                    price_data,
+                    exit_config.get('targets', [])
+                )
+        
+        # Fall back to global config
         exit_strategy = self.config['exit_strategy']
         
         if exit_strategy == 'time_based':
@@ -533,6 +560,75 @@ class BacktestEngine:
             current_time += timedelta(minutes=1)
             
         # Time-based exit if stop not hit
+        return await self._time_based_exit(entry_time, price_data)
+        
+    async def _ladder_exit(
+        self,
+        entry_time: datetime,
+        entry_price: float,
+        price_data: Dict[datetime, float],
+        targets: List[Tuple[float, float]]
+    ) -> Tuple[datetime, float, str]:
+        """Exit using ladder strategy (e.g., v1.2 recipe)"""
+        
+        if not targets:
+            # Fall back to time-based if no targets
+            return await self._time_based_exit(entry_time, price_data)
+            
+        max_hold_time = entry_time + timedelta(hours=24)  # Max 24 hour hold
+        position_remaining = 1.0  # Start with 100% position
+        weighted_exit_price = 0.0
+        exit_time = None
+        exit_reasons = []
+        
+        # Sort targets by multiplier
+        sorted_targets = sorted(targets, key=lambda x: x[0])
+        
+        # Track price movement
+        current_time = entry_time
+        while current_time < max_hold_time and position_remaining > 0.01:  # 1% minimum
+            if current_time in price_data:
+                current_price = price_data[current_time]
+                price_multiple = current_price / entry_price
+                
+                # Check each target
+                for target_multiple, sell_fraction in sorted_targets:
+                    # Use small tolerance for price targets
+                    if abs(price_multiple - target_multiple) <= 0.1:
+                        # Calculate actual sell amount
+                        if target_multiple == 2.0:
+                            # Special handling for 2x: sell to leave 1.7x initial value
+                            # If we have 2x, we need to sell 0.3/2 = 0.15 (15%)
+                            actual_sell_fraction = 0.15
+                        else:
+                            actual_sell_fraction = sell_fraction * position_remaining
+                            
+                        # Update weighted exit price
+                        weighted_exit_price += current_price * actual_sell_fraction
+                        position_remaining -= actual_sell_fraction
+                        exit_time = current_time
+                        exit_reasons.append(f"{target_multiple}x_target")
+                        
+                        # Remove this target from future checks
+                        sorted_targets = [t for t in sorted_targets if t[0] != target_multiple]
+                        break
+                        
+            current_time += timedelta(minutes=1)
+            
+        # If position still remaining after max hold time
+        if position_remaining > 0.01 and current_time in price_data:
+            final_price = price_data[current_time]
+            weighted_exit_price += final_price * position_remaining
+            exit_time = current_time
+            exit_reasons.append("max_hold_time")
+            
+        # Calculate average exit price
+        if exit_time:
+            avg_exit_price = weighted_exit_price / (1.0 - position_remaining) if position_remaining < 1.0 else weighted_exit_price
+            exit_reason = ", ".join(exit_reasons)
+            return exit_time, avg_exit_price, exit_reason
+            
+        # Fallback
         return await self._time_based_exit(entry_time, price_data)
         
     def _calculate_portfolio_metrics(
