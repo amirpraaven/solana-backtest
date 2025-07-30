@@ -5,7 +5,7 @@
     "buildCommand": "./build.sh"
   },
   "deploy": {
-    "startCommand": "./start.sh",
+    "startCommand": "python main.py",
     "healthcheckPath": "/health/simple",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
