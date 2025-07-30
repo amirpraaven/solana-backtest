@@ -170,27 +170,8 @@ from .strategy_routes import router as strategy_router
 app.include_router(general_router)
 app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
 
-# Serve frontend build if it exists
-frontend_build_path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "build")
-if os.path.exists(frontend_build_path):
-    app.mount("/", StaticFiles(directory=frontend_build_path, html=True), name="frontend")
-    logger.info(f"Serving frontend from {frontend_build_path}")
 
-
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "Solana Token Backtesting API",
-        "version": "1.0.0",
-        "status": "operational",
-        "docs": "/docs",
-        "redoc": "/redoc"
-    }
-
-
-# Simple health check for Railway
+# Simple health check for Railway - MUST be before static files mount
 @app.get("/health/simple")
 async def simple_health_check():
     """Simple health check that responds immediately"""
@@ -262,6 +243,26 @@ async def metrics():
         ])
         
     return "\n".join(metrics_data)
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Solana Token Backtesting API",
+        "version": "1.0.0",
+        "status": "operational",
+        "docs": "/docs",
+        "redoc": "/redoc"
+    }
+
+
+# Serve frontend build if it exists - MUST be last to avoid catching API routes
+frontend_build_path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "build")
+if os.path.exists(frontend_build_path):
+    app.mount("/", StaticFiles(directory=frontend_build_path, html=True), name="frontend")
+    logger.info(f"Serving frontend from {frontend_build_path}")
 
 
 # Export for uvicorn
