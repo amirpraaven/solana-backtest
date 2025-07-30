@@ -11,6 +11,7 @@ import aioredis
 import asyncio
 import logging
 from typing import Optional
+from datetime import datetime
 
 from config import settings, get_database_url, get_redis_url
 from config.logging import setup_logging
@@ -214,7 +215,11 @@ app.include_router(batch_router, prefix="/batch", tags=["batch-backtest"])
 async def simple_health_check():
     """Simple health check that responds immediately"""
     # This endpoint must ALWAYS work, even if services are down
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    try:
+        return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    except Exception:
+        # Even if datetime fails, return something
+        return {"status": "ok"}
 
 
 # Health check

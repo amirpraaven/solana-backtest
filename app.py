@@ -22,7 +22,11 @@ try:
     
     @app.get("/health/simple")
     async def health_check():
-        return {"status": "ok", "mode": "minimal"}
+        try:
+            from datetime import datetime
+            return {"status": "ok", "mode": "minimal", "timestamp": datetime.utcnow().isoformat()}
+        except:
+            return {"status": "ok", "mode": "minimal"}
     
     @app.get("/")
     async def root():
@@ -36,6 +40,9 @@ try:
         app = main_app  # Use the main app if import succeeds
     except Exception as e:
         print(f"✗ Failed to import main app: {e}")
+        import traceback
+        print("Full traceback:")
+        traceback.print_exc()
         print("! Using minimal app instead")
         
 except Exception as e:
