@@ -32,6 +32,7 @@ try:
     try:
         from src.web.app import app as main_app
         print("✓ Main app imported successfully")
+        print("✓ Using full Solana Backtest API")
         app = main_app  # Use the main app if import succeeds
     except Exception as e:
         print(f"✗ Failed to import main app: {e}")

@@ -20,11 +20,12 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class BacktestJobManager:
+class JobManager:
     """Manages backtest jobs with Redis for state storage"""
     
-    def __init__(self, redis_client: aioredis.Redis):
+    def __init__(self, redis_client: aioredis.Redis, db_pool=None):
         self.redis = redis_client
+        self.db_pool = db_pool
         self.running_jobs: Dict[str, asyncio.Task] = {}
         
     async def create_job(
@@ -418,3 +419,5 @@ class BacktestJobExecutor:
                     trade['entry_time'], trade['entry_price'], trade['exit_time'],
                     trade['exit_price'], trade['pnl_percent'], trade['pnl_usd'],
                     trade['exit_reason'])
+# Backward compatibility alias
+BacktestJobManager = JobManager
