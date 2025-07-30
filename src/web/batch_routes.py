@@ -6,10 +6,11 @@ from datetime import datetime, timedelta
 import logging
 import json
 import asyncio
+from decimal import Decimal
 
 from src.engine.job_manager import JobManager
-from src.strategies import StrategyManager
-from src.engine import BacktestEngine
+from src.strategies.manager import StrategyManager
+from src.engine.backtest import BacktestEngine
 from .dependencies import (
     get_db, get_redis_client, get_helius_client, 
     get_birdeye_client, get_job_manager, get_strategy_manager,
@@ -18,6 +19,17 @@ from .dependencies import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def json_serializer(obj):
+    """JSON serializer for objects not serializable by default"""
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif hasattr(obj, '__dict__'):
+        return obj.__dict__
+    raise TypeError(f"Type {type(obj)} not serializable")
 
 
 @router.post("/backtest/new-tokens")
@@ -106,7 +118,7 @@ async def backtest_new_tokens(
                     "tokens": [],
                     "parameters": {
                         "strategy_id": strategy_id,
-                        "strategy_name": strategy['name'],
+                        "strategy_name": strategy.get('name', 'Unknown'),
                         "hours_back": hours_back,
                         "min_liquidity": min_liquidity,
                         "backtest_days": backtest_days
@@ -120,10 +132,16 @@ async def backtest_new_tokens(
                     await job_manager.update_job_progress(
                         job_id, 
                         int(progress),
-                        f"Backtesting {token['symbol']} ({idx + 1}/{len(filtered_tokens)})..."
+                        f"Backtesting {token.get('symbol', 'Unknown')} ({idx + 1}/{len(filtered_tokens)})..."
                     )
                     
                     try:
+                        # Skip if no address
+                        token_address = token.get('address', '')
+                        if not token_address:
+                            logger.warning(f"Skipping token {token.get('symbol', 'Unknown')} - no address")
+                            continue
+                            
                         # Set backtest date range
                         end_date = datetime.utcnow()
                         start_date = end_date - timedelta(days=backtest_days)
@@ -132,10 +150,10 @@ async def backtest_new_tokens(
                         result = await backtest_engine.run_backtest(
                             strategy_config={
                                 'id': strategy_id,
-                                'name': strategy['name'],
-                                'conditions': strategy['conditions']
+                                'name': strategy.get('name', 'Unknown'),
+                                'conditions': strategy.get('conditions', {})
                             },
-                            token_addresses=[token['address']],
+                            token_addresses=[token_address],
                             start_date=start_date,
                             end_date=end_date,
                             initial_capital=initial_capital,
@@ -154,9 +172,9 @@ async def backtest_new_tokens(
                         
                         token_result = {
                             "token": {
-                                "address": token['address'],
-                                "symbol": token['symbol'],
-                                "name": token['name'],
+                                "address": token.get('address', ''),
+                                "symbol": token.get('symbol', 'Unknown'),
+                                "name": token.get('name', 'Unknown Token'),
                                 "age_hours": token.get('age_hours', 0),
                                 "liquidity": token.get('liquidity', 0),
                                 "volume_24h": token.get('volume24h', 0)
@@ -182,7 +200,7 @@ async def backtest_new_tokens(
                         if (not batch_results["summary"]["best_token"] or 
                             total_pnl > batch_results["summary"]["best_token"]["pnl"]):
                             batch_results["summary"]["best_token"] = {
-                                "symbol": token['symbol'],
+                                "symbol": token.get('symbol', 'Unknown'),
                                 "pnl": total_pnl,
                                 "return_pct": total_return
                             }
@@ -190,17 +208,17 @@ async def backtest_new_tokens(
                         if (not batch_results["summary"]["worst_token"] or 
                             total_pnl < batch_results["summary"]["worst_token"]["pnl"]):
                             batch_results["summary"]["worst_token"] = {
-                                "symbol": token['symbol'],
+                                "symbol": token.get('symbol', 'Unknown'),
                                 "pnl": total_pnl,
                                 "return_pct": total_return
                             }
                         
                     except Exception as e:
-                        logger.error(f"Error backtesting {token['symbol']}: {e}")
+                        logger.error(f"Error backtesting {token.get('symbol', 'Unknown')}: {e}")
                         batch_results["tokens"].append({
                             "token": {
-                                "symbol": token['symbol'],
-                                "address": token['address']
+                                "symbol": token.get('symbol', 'Unknown'),
+                                "address": token.get('address', '')
                             },
                             "backtest": {
                                 "status": "failed",
@@ -237,7 +255,7 @@ async def backtest_new_tokens(
                 await redis.setex(
                     f"batch_results:{job_id}",
                     86400,  # 24 hour TTL
-                    json.dumps(batch_results)
+                    json.dumps(batch_results, default=json_serializer)
                 )
                 
                 await job_manager.complete_job(job_id, batch_results["summary"])
