@@ -1,0 +1,41 @@
+# Core dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database
+asyncpg==0.29.0
+sqlalchemy==2.0.23
+alembic==1.13.0
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# API clients
+aiohttp==3.9.1
+httpx==0.25.2
+backoff==2.2.1
+ratelimit==2.2.1
+
+# Data processing
+numpy==1.26.2
+pandas==2.1.4
+pytz==2023.3
+
+# Crypto/Solana specific
+base58==2.1.1
+solders==0.19.0
+
+# Development
+pytest==7.4.3
+pytest-asyncio==0.21.1
+python-dotenv==1.0.0
+
+# Monitoring
+prometheus-client==0.19.0
+
+# Documentation
+mkdocs==1.5.3
+mkdocs-material==9.5.2
