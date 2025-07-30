@@ -96,3 +96,15 @@ def get_token_monitor():
     if not token_monitor:
         raise RuntimeError("Token monitor not initialized")
     return token_monitor
+
+def get_strategy_manager():
+    """Get strategy manager"""
+    if not strategy_manager:
+        raise RuntimeError("Strategy manager not initialized")
+    return strategy_manager
+
+def get_backtest_engine():
+    """Get backtest engine"""
+    if not backtest_engine:
+        raise RuntimeError("Backtest engine not initialized")
+    return backtest_engine

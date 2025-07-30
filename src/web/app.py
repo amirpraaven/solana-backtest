@@ -180,6 +180,7 @@ from .strategy_routes import router as strategy_router
 from .token_routes import router as token_router
 from .sample_data_routes import router as sample_router
 from .sync_routes import router as sync_router
+from .batch_routes import router as batch_router
 
 # Include routers
 app.include_router(general_router)
@@ -187,6 +188,7 @@ app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
 app.include_router(token_router, prefix="/tokens", tags=["tokens"])
 app.include_router(sample_router, prefix="/sample-data", tags=["sample-data"])
 app.include_router(sync_router, prefix="/sync", tags=["data-sync"])
+app.include_router(batch_router, prefix="/batch", tags=["batch-backtest"])
 
 
 # Simple health check for Railway - MUST be before static files mount

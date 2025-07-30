@@ -84,4 +84,19 @@ export const systemAPI = {
   getSupportedDexes: () => api.get('/supported-dexes'),
 };
 
+// Batch Backtest API
+export const batchAPI = {
+  // Run batch backtest on new tokens
+  runNewTokenBacktest: (params) => api.post('/batch/backtest/new-tokens', params),
+  
+  // Get batch job status
+  getStatus: (jobId) => api.get(`/batch/status/${jobId}`),
+  
+  // Get batch results
+  getResults: (jobId) => api.get(`/batch/results/${jobId}`),
+  
+  // Backtest specific token list
+  backtestTokenList: (params) => api.post('/batch/backtest/token-list', params),
+};
+
 export default api;

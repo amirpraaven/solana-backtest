@@ -12,6 +12,7 @@ import {
 import { Toaster } from 'react-hot-toast';
 import StrategyManager from './components/StrategyManager';
 import BacktestRunner from './components/BacktestRunner';
+import BatchBacktest from './components/BatchBacktest';
 import Results from './components/Results';
 import './App.css';
 
@@ -50,6 +51,7 @@ function App() {
             <Tabs value={tabValue} onChange={handleTabChange}>
               <Tab label="Strategies" />
               <Tab label="Run Backtest" />
+              <Tab label="Batch Test New Tokens" />
               <Tab label="Results" />
             </Tabs>
           </Box>
@@ -66,12 +68,16 @@ function App() {
               strategies={strategies}
               onBacktestComplete={(result) => {
                 setBacktestResults([result, ...backtestResults]);
-                setTabValue(2); // Switch to results tab
+                setTabValue(3); // Switch to results tab
               }}
             />
           </TabPanel>
 
           <TabPanel value={tabValue} index={2}>
+            <BatchBacktest strategies={strategies} />
+          </TabPanel>
+
+          <TabPanel value={tabValue} index={3}>
             <Results results={backtestResults} />
           </TabPanel>
         </Paper>
