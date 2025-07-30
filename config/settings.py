@@ -1,9 +1,10 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from typing import Optional
 
 class Settings(BaseSettings):
     # API Keys
-    HELIUS_API_KEY: str
+    HELIUS_API_KEY: str = Field(alias="HELIUS_KEY")
     BIRDEYE_API_KEY: str
     
     # Database
@@ -33,5 +34,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        populate_by_name = True
 
 settings = Settings()
