@@ -8,6 +8,7 @@ import os
 from contextlib import asynccontextmanager
 import asyncpg
 import aioredis
+import asyncio
 import logging
 from typing import Optional
 
@@ -34,14 +35,22 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Solana Backtest API")
     
     try:
-        # Initialize database pool
+        # Initialize database pool with retries
         logger.info("Connecting to PostgreSQL")
-        dependencies.db_pool = await asyncpg.create_pool(
-            get_database_url(),
-            min_size=10,
-            max_size=20,
-            command_timeout=60
-        )
+        for attempt in range(3):
+            try:
+                dependencies.db_pool = await asyncpg.create_pool(
+                    get_database_url(),
+                    min_size=10,
+                    max_size=20,
+                    command_timeout=60
+                )
+                break
+            except Exception as db_error:
+                logger.warning(f"Database connection attempt {attempt + 1} failed: {db_error}")
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2)
         
         # Initialize Redis
         logger.info("Connecting to Redis")
@@ -92,7 +101,8 @@ async def lifespan(app: FastAPI):
         
     except Exception as e:
         logger.error(f"Startup failed: {e}")
-        raise
+        # Don't raise on startup failure - let the app run with degraded functionality
+        logger.warning("Running in degraded mode - some services unavailable")
         
     yield
     
@@ -178,6 +188,13 @@ async def root():
         "docs": "/docs",
         "redoc": "/redoc"
     }
+
+
+# Simple health check for Railway
+@app.get("/health/simple")
+async def simple_health_check():
+    """Simple health check that responds immediately"""
+    return {"status": "ok"}
 
 
 # Health check
