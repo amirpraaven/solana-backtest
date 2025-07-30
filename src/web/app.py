@@ -3,6 +3,8 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+import os
 from contextlib import asynccontextmanager
 import asyncpg
 import aioredis
@@ -157,6 +159,12 @@ from .strategy_routes import router as strategy_router
 # Include routers
 app.include_router(general_router)
 app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
+
+# Serve frontend build if it exists
+frontend_build_path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "build")
+if os.path.exists(frontend_build_path):
+    app.mount("/", StaticFiles(directory=frontend_build_path, html=True), name="frontend")
+    logger.info(f"Serving frontend from {frontend_build_path}")
 
 
 # Root endpoint

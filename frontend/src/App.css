@@ -1,0 +1,8 @@
+.App {
+  min-height: 100vh;
+  background-color: #f5f5f5;
+}
+
+.MuiAppBar-root {
+  background-color: #1976d2 !important;
+}
