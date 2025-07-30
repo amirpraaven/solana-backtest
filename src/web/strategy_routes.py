@@ -54,7 +54,8 @@ class StrategyConfig(BaseModel):
             
         valid_conditions = [
             'token_age', 'liquidity', 'market_cap', 'volume_window',
-            'large_buys', 'buy_pressure', 'unique_wallets', 'price_change'
+            'large_buys', 'buy_pressure', 'unique_wallets', 'price_change',
+            'volume_24h', 'price_change_5m'  # Add frontend conditions
         ]
         
         for condition_name in v:
@@ -148,6 +149,21 @@ async def create_from_template(
         raise HTTPException(400, detail=str(e))
 
 
+@router.get("")
+async def get_strategies(
+    active_only: bool = Query(True, description="Only show active strategies"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    manager: StrategyManager = Depends(get_strategy_manager)
+):
+    """Get all strategies - main endpoint for frontend"""
+    
+    strategies = await manager.list_strategies(active_only, limit, offset)
+    
+    # Return array directly for frontend compatibility
+    return strategies
+
+
 @router.get("/list", response_model=Dict)
 async def list_strategies(
     active_only: bool = Query(True, description="Only show active strategies"),
@@ -155,7 +171,7 @@ async def list_strategies(
     offset: int = Query(0, ge=0),
     manager: StrategyManager = Depends(get_strategy_manager)
 ):
-    """List all strategies"""
+    """List all strategies - alternative endpoint with metadata"""
     
     strategies = await manager.list_strategies(active_only, limit, offset)
     
