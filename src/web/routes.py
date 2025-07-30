@@ -9,7 +9,7 @@ import logging
 from src.services import TokenAgeTracker
 from src.api import BirdeyeClient, HeliusClient
 from src.data.models import Transaction, PoolState
-from .app import (
+from .dependencies import (
     get_db, get_redis, get_token_tracker, 
     get_birdeye, get_helius
 )

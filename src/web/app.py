@@ -16,22 +16,11 @@ from src.services import TokenAgeTracker, TokenMonitor
 from src.strategies import StrategyManager
 from src.engine import BacktestEngine
 
-from .routes import router as general_router
-from .strategy_routes import router as strategy_router
-
 # Setup logging
 logger = setup_logging()
 
-# Global connections
-db_pool: Optional[asyncpg.Pool] = None
-redis_client: Optional[aioredis.Redis] = None
-helius_client: Optional[HeliusClient] = None
-birdeye_client: Optional[BirdeyeClient] = None
-cache: Optional[APICache] = None
-token_tracker: Optional[TokenAgeTracker] = None
-token_monitor: Optional[TokenMonitor] = None
-strategy_manager: Optional[StrategyManager] = None
-backtest_engine: Optional[BacktestEngine] = None
+# Import dependencies module to set up globals
+from . import dependencies
 
 
 @asynccontextmanager
@@ -39,15 +28,13 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     
     # Startup
-    global db_pool, redis_client, helius_client, birdeye_client, cache
-    global token_tracker, token_monitor, strategy_manager, backtest_engine
     
     logger.info("Starting Solana Backtest API")
     
     try:
         # Initialize database pool
         logger.info("Connecting to PostgreSQL")
-        db_pool = await asyncpg.create_pool(
+        dependencies.db_pool = await asyncpg.create_pool(
             settings.DATABASE_URL,
             min_size=10,
             max_size=20,
@@ -56,7 +43,7 @@ async def lifespan(app: FastAPI):
         
         # Initialize Redis
         logger.info("Connecting to Redis")
-        redis_client = await aioredis.from_url(
+        dependencies.redis_client = await aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True
@@ -64,36 +51,36 @@ async def lifespan(app: FastAPI):
         
         # Initialize API clients
         logger.info("Initializing API clients")
-        helius_client = HeliusClient(settings.HELIUS_API_KEY)
-        birdeye_client = BirdeyeClient(settings.BIRDEYE_API_KEY)
+        dependencies.helius_client = HeliusClient(settings.HELIUS_API_KEY)
+        dependencies.birdeye_client = BirdeyeClient(settings.BIRDEYE_API_KEY)
         
         # Initialize cache
-        cache = APICache(settings.REDIS_URL)
-        await cache.connect()
+        dependencies.api_cache = APICache(settings.REDIS_URL)
+        await dependencies.api_cache.connect()
         
         # Initialize services
         logger.info("Initializing services")
-        token_tracker = TokenAgeTracker(
-            helius_client,
-            birdeye_client,
-            db_pool,
-            redis_client
+        dependencies.token_tracker = TokenAgeTracker(
+            dependencies.helius_client,
+            dependencies.birdeye_client,
+            dependencies.db_pool,
+            dependencies.redis_client
         )
         
         token_monitor = TokenMonitor(
-            birdeye_client,
-            token_tracker,
-            db_pool,
-            redis_client
+            dependencies.birdeye_client,
+            dependencies.token_tracker,
+            dependencies.db_pool,
+            dependencies.redis_client
         )
         
-        strategy_manager = StrategyManager(db_pool)
+        dependencies.strategy_manager = StrategyManager(dependencies.db_pool)
         
-        backtest_engine = BacktestEngine(
-            helius_client,
-            birdeye_client,
-            db_pool,
-            redis_client
+        dependencies.backtest_engine = BacktestEngine(
+            dependencies.helius_client,
+            dependencies.birdeye_client,
+            dependencies.db_pool,
+            dependencies.redis_client
         )
         
         # Start token monitor
@@ -117,11 +104,11 @@ async def lifespan(app: FastAPI):
         if cache:
             await cache.disconnect()
             
-        if db_pool:
-            await db_pool.close()
+        if dependencies.db_pool:
+            await dependencies.db_pool.close()
             
-        if redis_client:
-            await redis_client.close()
+        if dependencies.redis_client:
+            await dependencies.redis_client.close()
             
     except Exception as e:
         logger.error(f"Cleanup error: {e}")
@@ -163,6 +150,10 @@ async def database_error_handler(request, exc):
     )
 
 
+# Import routers after app is created to avoid circular imports
+from .routes import router as general_router
+from .strategy_routes import router as strategy_router
+
 # Include routers
 app.include_router(general_router)
 app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
@@ -197,9 +188,9 @@ async def health_check():
     }
     
     # Check database
-    if db_pool:
+    if dependencies.db_pool:
         try:
-            async with db_pool.acquire() as conn:
+            async with dependencies.db_pool.acquire() as conn:
                 await conn.fetchval("SELECT 1")
             health_status["database"] = "connected"
         except:
@@ -207,18 +198,18 @@ async def health_check():
             health_status["status"] = "degraded"
             
     # Check Redis
-    if redis_client:
+    if dependencies.redis_client:
         try:
-            await redis_client.ping()
+            await dependencies.redis_client.ping()
             health_status["redis"] = "connected"
         except:
             health_status["redis"] = "disconnected"
             health_status["status"] = "degraded"
             
     # Check API clients
-    if helius_client:
+    if dependencies.helius_client:
         health_status["services"]["helius"] = "configured"
-    if birdeye_client:
+    if dependencies.birdeye_client:
         health_status["services"]["birdeye"] = "configured"
         
     return health_status
@@ -232,9 +223,9 @@ async def metrics():
     metrics_data = []
     
     # Database metrics
-    if db_pool:
-        pool_size = db_pool.get_size()
-        pool_free = db_pool.get_idle_size()
+    if dependencies.db_pool:
+        pool_size = dependencies.db_pool.get_size()
+        pool_free = dependencies.db_pool.get_idle_size()
         
         metrics_data.extend([
             f"# HELP db_pool_size Database connection pool size",
@@ -246,57 +237,6 @@ async def metrics():
         ])
         
     return "\n".join(metrics_data)
-
-
-# Dependency injection
-async def get_db():
-    """Get database connection"""
-    if not db_pool:
-        raise HTTPException(status_code=503, detail="Database not available")
-    async with db_pool.acquire() as conn:
-        yield conn
-
-
-async def get_redis():
-    """Get Redis connection"""
-    if not redis_client:
-        raise HTTPException(status_code=503, detail="Redis not available")
-    return redis_client
-
-
-async def get_helius():
-    """Get Helius client"""
-    if not helius_client:
-        raise HTTPException(status_code=503, detail="Helius client not available")
-    return helius_client
-
-
-async def get_birdeye():
-    """Get Birdeye client"""
-    if not birdeye_client:
-        raise HTTPException(status_code=503, detail="Birdeye client not available")
-    return birdeye_client
-
-
-async def get_token_tracker():
-    """Get token tracker"""
-    if not token_tracker:
-        raise HTTPException(status_code=503, detail="Token tracker not available")
-    return token_tracker
-
-
-async def get_strategy_manager():
-    """Get strategy manager"""
-    if not strategy_manager:
-        raise HTTPException(status_code=503, detail="Strategy manager not available")
-    return strategy_manager
-
-
-async def get_backtest_engine():
-    """Get backtest engine"""
-    if not backtest_engine:
-        raise HTTPException(status_code=503, detail="Backtest engine not available")
-    return backtest_engine
 
 
 # Export for uvicorn

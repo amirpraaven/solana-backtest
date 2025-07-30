@@ -10,7 +10,7 @@ import logging
 
 from src.strategies import StrategyManager, STRATEGY_TEMPLATES, get_template
 from src.engine import BacktestEngine
-from .app import get_strategy_manager, get_backtest_engine, get_db
+from .dependencies import get_strategy_manager, get_backtest_engine, get_db
 
 logger = logging.getLogger(__name__)
 
