@@ -39,14 +39,39 @@ export const strategyAPI = {
   // Get backtest result
   getBacktestResult: (id, includeTrades = true) => 
     api.get(`/strategies/backtest/${id}?include_trades=${includeTrades}`),
+  
+  // Job management
+  getJobStatus: (jobId) => api.get(`/strategies/jobs/${jobId}`),
+  listJobs: (status = null, limit = 50) => 
+    api.get(`/strategies/jobs${status ? `?status=${status}` : ''}${limit ? `&limit=${limit}` : ''}`),
+  cancelJob: (jobId) => api.post(`/strategies/jobs/${jobId}/cancel`),
 };
 
 export const tokenAPI = {
-  // Get new tokens
+  // Get trending tokens
+  getTrending: (timeFrame = '24h', sortBy = 'volume', limit = 20) => 
+    api.get(`/tokens/trending?time_frame=${timeFrame}&sort_by=${sortBy}&limit=${limit}`),
+  
+  // Get new token listings
+  getNewListings: (maxAgeHours = 24, minLiquidity = 1000, limit = 50) => 
+    api.get(`/tokens/new-listings?max_age_hours=${maxAgeHours}&min_liquidity=${minLiquidity}&limit=${limit}`),
+  
+  // Search tokens
+  searchTokens: (query, limit = 10) => 
+    api.get(`/tokens/search?query=${query}&limit=${limit}`),
+  
+  // Get token info
+  getTokenInfo: (tokenAddress) => 
+    api.get(`/tokens/${tokenAddress}/info`),
+  
+  // Populate token data (for testing)
+  populateTokenData: (tokenAddress, daysBack = 7) => 
+    api.post(`/tokens/${tokenAddress}/populate?days_back=${daysBack}`),
+  
+  // Legacy endpoints
   getNewTokens: (maxAgeHours = 72, minLiquidity = 5000) => 
     api.get(`/tokens/new?max_age_hours=${maxAgeHours}&min_liquidity=${minLiquidity}`),
   
-  // Analyze token
   analyzeToken: (tokenAddress) => 
     api.post(`/analyze/token/${tokenAddress}?include_price_data=true`),
 };

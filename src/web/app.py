@@ -169,10 +169,14 @@ async def database_error_handler(request, exc):
 # Import routers after app is created to avoid circular imports
 from .routes import router as general_router
 from .strategy_routes import router as strategy_router
+from .token_routes import router as token_router
+from .sample_data_routes import router as sample_router
 
 # Include routers
 app.include_router(general_router)
 app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
+app.include_router(token_router, prefix="/tokens", tags=["tokens"])
+app.include_router(sample_router, prefix="/sample-data", tags=["sample-data"])
 
 
 # Simple health check for Railway - MUST be before static files mount

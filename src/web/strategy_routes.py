@@ -10,7 +10,8 @@ import logging
 
 from src.strategies import StrategyManager, STRATEGY_TEMPLATES, get_template
 from src.engine import BacktestEngine
-from .dependencies import get_strategy_manager, get_backtest_engine, get_db
+from src.engine.job_manager import BacktestJobManager, BacktestJobExecutor, JobStatus
+from .dependencies import get_strategy_manager, get_backtest_engine, get_db, get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,11 @@ class BacktestRequest(BaseModel):
     start_date: datetime
     end_date: datetime
     initial_capital: float = Field(default=10000, gt=0)
+    position_size: float = Field(default=0.1, gt=0, le=1)  # Percentage of capital
+    max_positions: int = Field(default=5, ge=1, le=20)
+    stop_loss: float = Field(default=0.1, ge=0, le=1)  # 10% default
+    take_profit: float = Field(default=0.5, ge=0, le=10)  # 50% default
+    time_limit_hours: int = Field(default=24, ge=1, le=168)  # Max hold time
     config_overrides: Optional[Dict[str, Any]] = None
     
     @validator('end_date')
@@ -300,45 +306,58 @@ async def validate_strategy(
     }
 
 
-@router.post("/backtest", response_model=Dict)
+@router.post("/backtest")
 async def run_strategy_backtest(
     request: BacktestRequest,
-    background_tasks: BackgroundTasks,
-    engine: BacktestEngine = Depends(get_backtest_engine),
     manager: StrategyManager = Depends(get_strategy_manager),
-    db_conn = Depends(get_db)
+    redis_client = Depends(get_redis_client)
 ):
-    """Run backtest with specific strategy"""
+    """Run backtest with specific strategy using job queue"""
     
     # Validate strategy exists
     strategy = await manager.get_strategy(request.strategy_id)
     if not strategy:
         raise HTTPException(404, detail="Strategy not found")
-        
-    # Create backtest record
-    backtest_id = await db_conn.fetchval("""
-        INSERT INTO backtest_results (strategy_id, date_range, status)
-        VALUES ($1, $2, 'pending')
-        RETURNING id
-    """, request.strategy_id, (request.start_date, request.end_date))
     
-    # Run in background
-    background_tasks.add_task(
-        execute_backtest_task,
-        engine,
-        backtest_id,
-        request.strategy_id,
-        request.token_addresses,
-        request.start_date,
-        request.end_date,
-        request.initial_capital,
-        request.config_overrides
+    # Validate token addresses
+    if not request.token_addresses:
+        raise HTTPException(400, detail="At least one token address is required")
+        
+    # Create job manager
+    job_manager = BacktestJobManager(redis_client)
+    
+    # Create job with parameters
+    job_params = {
+        'strategy_id': request.strategy_id,
+        'strategy_name': strategy['name'],
+        'token_addresses': request.token_addresses,
+        'start_date': request.start_date.isoformat(),
+        'end_date': request.end_date.isoformat(),
+        'initial_capital': request.initial_capital,
+        'position_size': request.position_size,
+        'max_positions': request.max_positions,
+        'stop_loss': request.stop_loss,
+        'take_profit': request.take_profit,
+        'time_limit_hours': request.time_limit_hours,
+        'config_overrides': request.config_overrides
+    }
+    
+    # Create job
+    job_id = await job_manager.create_job(
+        job_type='backtest',
+        params=job_params
     )
     
+    # Start job execution asynchronously
+    from .dependencies import get_job_executor
+    executor = await get_job_executor()
+    await job_manager.start_job(job_id, executor.execute_backtest_job)
+    
     return {
-        "backtest_id": backtest_id,
-        "status": "running",
-        "message": "Backtest started successfully"
+        "job_id": job_id,
+        "status": "started",
+        "message": "Backtest job created successfully",
+        "monitor_url": f"/strategies/jobs/{job_id}"
     }
 
 
@@ -432,6 +451,74 @@ async def get_strategy_performance(
         raise HTTPException(404, detail="Strategy not found")
         
     return performance
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_status(
+    job_id: str,
+    redis_client = Depends(get_redis_client)
+):
+    """Get job status and progress"""
+    
+    job_manager = BacktestJobManager(redis_client)
+    job = await job_manager.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+        
+    return {
+        "job_id": job_id,
+        "status": job['status'],
+        "progress": job['progress'],
+        "created_at": job['created_at'],
+        "updated_at": job['updated_at'],
+        "logs": job.get('logs', []),
+        "error": job.get('error'),
+        "result": job.get('result') if job['status'] == JobStatus.COMPLETED else None
+    }
+
+
+@router.get("/jobs")
+async def list_jobs(
+    status: Optional[JobStatus] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    redis_client = Depends(get_redis_client)
+):
+    """List all jobs with optional status filter"""
+    
+    job_manager = BacktestJobManager(redis_client)
+    jobs = await job_manager.list_jobs(status=status, limit=limit)
+    
+    return {
+        "jobs": jobs,
+        "count": len(jobs),
+        "filter": {"status": status} if status else None
+    }
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    redis_client = Depends(get_redis_client)
+):
+    """Cancel a running job"""
+    
+    job_manager = BacktestJobManager(redis_client)
+    job = await job_manager.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+        
+    if job['status'] != JobStatus.RUNNING:
+        raise HTTPException(400, detail=f"Cannot cancel job in {job['status']} status")
+        
+    cancelled = await job_manager.cancel_job(job_id)
+    
+    return {
+        "job_id": job_id,
+        "cancelled": cancelled,
+        "message": "Job cancellation requested" if cancelled else "Job not found in running jobs"
+    }
 
 
 # Background task function

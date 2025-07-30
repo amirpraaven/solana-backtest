@@ -61,3 +61,24 @@ async def get_backtest_engine():
     if not backtest_engine:
         raise RuntimeError("Backtest engine not initialized")
     return backtest_engine
+
+def get_redis_client():
+    """Get Redis client (sync wrapper)"""
+    return redis_client
+
+def get_helius_client():
+    """Get Helius client (sync wrapper)"""
+    return helius_client
+
+def get_birdeye_client():
+    """Get Birdeye client (sync wrapper)"""
+    return birdeye_client
+
+async def get_job_executor():
+    """Get job executor"""
+    from src.engine.job_manager import BacktestJobExecutor
+    return BacktestJobExecutor(
+        backtest_engine=backtest_engine,
+        strategy_manager=strategy_manager,
+        db_pool=db_pool
+    )
