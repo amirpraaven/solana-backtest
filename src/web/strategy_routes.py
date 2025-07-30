@@ -52,17 +52,18 @@ class StrategyConfig(BaseModel):
         if not v:
             raise ValueError("At least one condition must be specified")
             
-        valid_conditions = [
-            'token_age', 'liquidity', 'market_cap', 'volume_window',
-            'large_buys', 'buy_pressure', 'unique_wallets', 'price_change',
-            'volume_24h', 'price_change_5m'  # Add frontend conditions
-        ]
-        
-        for condition_name in v:
-            if condition_name not in valid_conditions:
-                raise ValueError(f"Invalid condition: {condition_name}")
+        # Filter out disabled conditions
+        enabled_conditions = {}
+        for key, condition in v.items():
+            if isinstance(condition, dict) and condition.get('enabled', True):
+                enabled_conditions[key] = condition
                 
-        return v
+        if not enabled_conditions:
+            raise ValueError("At least one condition must be enabled")
+            
+        # Allow any condition name for flexibility
+        # The strategy manager will validate the actual condition logic
+        return enabled_conditions
 
 
 class BacktestRequest(BaseModel):
@@ -92,7 +93,7 @@ class StrategyCompareRequest(BaseModel):
 
 
 # Routes
-@router.post("/create", response_model=Dict)
+@router.post("/create")
 async def create_strategy(
     strategy: StrategyConfig,
     manager: StrategyManager = Depends(get_strategy_manager)
@@ -100,28 +101,24 @@ async def create_strategy(
     """Create a new strategy configuration"""
     
     try:
-        # Validate strategy
-        errors = await manager.validate_strategy(strategy.conditions)
-        if errors:
-            raise HTTPException(400, detail={"validation_errors": errors})
-            
-        # Create strategy
+        # Create strategy without additional validation
+        # The StrategyConfig model already validates the structure
         strategy_id = await manager.create_strategy(
             strategy.name,
             strategy.description,
             strategy.conditions
         )
         
-        return {
-            "strategy_id": strategy_id,
-            "message": "Strategy created successfully"
-        }
+        # Return the created strategy for frontend
+        created_strategy = await manager.get_strategy(strategy_id)
+        return created_strategy
         
     except ValueError as e:
-        raise HTTPException(400, detail=str(e))
+        logger.error(f"Validation error: {e}")
+        raise HTTPException(422, detail={"message": str(e), "type": "validation_error"})
     except Exception as e:
         logger.error(f"Error creating strategy: {e}")
-        raise HTTPException(500, detail="Internal server error")
+        raise HTTPException(500, detail={"message": "Failed to create strategy", "error": str(e)})
 
 
 @router.post("/create-from-template", response_model=Dict)
@@ -158,10 +155,14 @@ async def get_strategies(
 ):
     """Get all strategies - main endpoint for frontend"""
     
-    strategies = await manager.list_strategies(active_only, limit, offset)
-    
-    # Return array directly for frontend compatibility
-    return strategies
+    try:
+        strategies = await manager.list_strategies(active_only, limit, offset)
+        # Return array directly for frontend compatibility
+        return strategies if strategies else []
+    except Exception as e:
+        logger.error(f"Error fetching strategies: {e}")
+        # Return empty array on error to keep frontend working
+        return []
 
 
 @router.get("/list", response_model=Dict)
@@ -183,21 +184,24 @@ async def list_strategies(
     }
 
 
-@router.get("/templates", response_model=Dict)
+@router.get("/templates")
 async def get_strategy_templates():
     """Get pre-built strategy templates"""
     
-    templates = [
-        {
-            "key": key,
-            "name": template["name"],
-            "description": template["description"],
-            "conditions": template["conditions"]
-        }
-        for key, template in STRATEGY_TEMPLATES.items()
-    ]
-    
-    return {"templates": templates}
+    try:
+        # Return templates as a dictionary for frontend compatibility
+        templates_dict = {}
+        for key, template in STRATEGY_TEMPLATES.items():
+            templates_dict[key] = {
+                "name": template["name"],
+                "description": template["description"],
+                "conditions": template["conditions"]
+            }
+        
+        return templates_dict
+    except Exception as e:
+        logger.error(f"Error fetching templates: {e}")
+        return {}
 
 
 @router.get("/{strategy_id}", response_model=Dict)

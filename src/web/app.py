@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Solana Backtest API")
     
     try:
+        # Ensure database is initialized
+        from src.utils.db_init import ensure_database_exists
+        await ensure_database_exists()
+        
         # Initialize database pool with retries
         logger.info("Connecting to PostgreSQL")
         for attempt in range(3):

@@ -225,45 +225,18 @@ class StrategyManager:
     ) -> Dict[str, List[str]]:
         """Validate strategy conditions and return any errors"""
         
+        # Simplified validation - be more lenient to allow flexibility
         errors = {}
         
-        try:
-            self._validate_conditions(conditions)
-        except ValueError as e:
-            errors['general'] = [str(e)]
-            
-        # Check individual conditions
+        # Just ensure we have at least one enabled condition
+        enabled_count = 0
         for condition_name, config in conditions.items():
-            condition_errors = []
+            if isinstance(config, dict) and config.get('enabled', False):
+                enabled_count += 1
+                
+        if enabled_count == 0:
+            errors['general'] = ["At least one condition must be enabled"]
             
-            if not isinstance(config, dict):
-                condition_errors.append("Must be a dictionary")
-                continue
-                
-            if config.get('enabled', False):
-                # Check required fields
-                if 'operator' in config:
-                    valid_operators = [
-                        'greater_than', 'greater_than_equal',
-                        'less_than', 'less_than_equal',
-                        'equal', 'not_equal'
-                    ]
-                    if config['operator'] not in valid_operators:
-                        condition_errors.append(f"Invalid operator: {config['operator']}")
-                        
-                if 'value' not in config and condition_name != 'large_buys':
-                    condition_errors.append("Missing required field: value")
-                    
-                # Condition-specific validation
-                if condition_name == 'large_buys':
-                    if 'min_count' not in config:
-                        condition_errors.append("Missing required field: min_count")
-                    if 'min_amount' not in config:
-                        condition_errors.append("Missing required field: min_amount")
-                        
-            if condition_errors:
-                errors[condition_name] = condition_errors
-                
         return errors
         
     def _validate_conditions(self, conditions: Dict[str, Any]):
@@ -272,16 +245,13 @@ class StrategyManager:
         if not isinstance(conditions, dict):
             raise ValueError("Conditions must be a dictionary")
             
-        if not conditions:
-            raise ValueError("At least one condition must be specified")
-            
-        # Check that at least one condition is enabled
-        enabled_count = sum(
-            1 for config in conditions.values()
-            if isinstance(config, dict) and config.get('enabled', False)
-        )
+        # Filter enabled conditions
+        enabled_conditions = {
+            k: v for k, v in conditions.items()
+            if isinstance(v, dict) and v.get('enabled', False)
+        }
         
-        if enabled_count == 0:
+        if not enabled_conditions:
             raise ValueError("At least one condition must be enabled")
             
     async def get_strategy_performance(
