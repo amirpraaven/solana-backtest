@@ -9,7 +9,7 @@ import aioredis
 import logging
 from typing import Optional
 
-from config import settings
+from config import settings, get_database_url, get_redis_url
 from config.logging import setup_logging
 from src.api import HeliusClient, BirdeyeClient, APICache
 from src.services import TokenAgeTracker, TokenMonitor
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
         # Initialize database pool
         logger.info("Connecting to PostgreSQL")
         dependencies.db_pool = await asyncpg.create_pool(
-            settings.DATABASE_URL,
+            get_database_url(),
             min_size=10,
             max_size=20,
             command_timeout=60
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
         # Initialize Redis
         logger.info("Connecting to Redis")
         dependencies.redis_client = await aioredis.from_url(
-            settings.REDIS_URL,
+            get_redis_url(),
             encoding="utf-8",
             decode_responses=True
         )
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         dependencies.birdeye_client = BirdeyeClient(settings.BIRDEYE_API_KEY)
         
         # Initialize cache
-        dependencies.api_cache = APICache(settings.REDIS_URL)
+        dependencies.api_cache = APICache(get_redis_url())
         await dependencies.api_cache.connect()
         
         # Initialize services

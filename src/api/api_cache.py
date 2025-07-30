@@ -5,7 +5,7 @@ import aioredis
 from datetime import datetime, timedelta
 import logging
 
-from config import settings
+from config import settings, get_redis_url
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ class APICache:
     """Redis-based caching layer for API responses"""
     
     def __init__(self, redis_url: Optional[str] = None):
-        self.redis_url = redis_url or settings.REDIS_URL
+        self.redis_url = redis_url or get_redis_url()
         self.redis: Optional[aioredis.Redis] = None
         self.default_ttl = settings.CACHE_TTL
         
