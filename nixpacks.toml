@@ -1,2 +1,2 @@
 [phases.setup]
-nixPkgs = ["nodejs-18_x"]
+nixPkgs = ["python39", "nodejs-18_x", "postgresql"]
