@@ -221,6 +221,28 @@ async def health_check():
     return health_status
 
 
+# Debug endpoint to check frontend status
+@app.get("/debug/frontend")
+async def debug_frontend():
+    """Debug endpoint to check frontend build status"""
+    frontend_build_path = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "build")
+    frontend_exists = os.path.exists(frontend_build_path)
+    
+    files = []
+    if frontend_exists:
+        try:
+            files = os.listdir(frontend_build_path)
+        except Exception as e:
+            files = [f"Error listing files: {str(e)}"]
+    
+    return {
+        "frontend_build_path": frontend_build_path,
+        "exists": frontend_exists,
+        "files": files,
+        "working_dir": os.getcwd()
+    }
+
+
 # Metrics endpoint
 @app.get("/metrics")
 async def metrics():
@@ -245,10 +267,10 @@ async def metrics():
     return "\n".join(metrics_data)
 
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint"""
+# Root endpoint - only for API calls, not browser requests
+@app.get("/api")
+async def api_root():
+    """API root endpoint"""
     return {
         "message": "Solana Token Backtesting API",
         "version": "1.0.0",
@@ -263,6 +285,20 @@ frontend_build_path = os.path.join(os.path.dirname(__file__), "..", "..", "front
 if os.path.exists(frontend_build_path):
     app.mount("/", StaticFiles(directory=frontend_build_path, html=True), name="frontend")
     logger.info(f"Serving frontend from {frontend_build_path}")
+else:
+    logger.warning(f"Frontend build not found at {frontend_build_path}")
+    # If no frontend, add a root endpoint that returns JSON
+    @app.get("/")
+    async def root():
+        """Root endpoint when no frontend is available"""
+        return {
+            "message": "Solana Token Backtesting API",
+            "version": "1.0.0",
+            "status": "operational",
+            "docs": "/docs",
+            "redoc": "/redoc",
+            "note": "Frontend not available - use API endpoints directly"
+        }
 
 
 # Export for uvicorn
