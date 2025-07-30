@@ -34,10 +34,18 @@ async def lifespan(app: FastAPI):
     
     logger.info("Starting Solana Backtest API")
     
+    # Initialize variables for cleanup
+    token_monitor = None
+    
     try:
         # Ensure database is initialized
-        from src.utils.db_init import ensure_database_exists
-        await ensure_database_exists()
+        try:
+            from src.utils.db_init import ensure_database_exists
+            await ensure_database_exists()
+            logger.info("Database initialization complete")
+        except Exception as db_init_error:
+            logger.warning(f"Database initialization failed: {db_init_error}")
+            # Continue anyway - the app can work with limited functionality
         
         # Initialize database pool with retries
         logger.info("Connecting to PostgreSQL")
@@ -105,9 +113,14 @@ async def lifespan(app: FastAPI):
             dependencies.db_pool
         )
         
-        # Start token monitor
-        dependencies.token_monitor = token_monitor
-        asyncio.create_task(token_monitor.start())
+        # Start token monitor (optional - don't fail startup)
+        try:
+            dependencies.token_monitor = token_monitor
+            # Start in background without blocking
+            asyncio.create_task(token_monitor.start())
+            logger.info("Token monitor started in background")
+        except Exception as tm_error:
+            logger.warning(f"Token monitor failed to start: {tm_error}. Continuing without monitoring.")
         
         logger.info("Application startup complete")
         
@@ -122,11 +135,11 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Solana Backtest API")
     
     try:
-        if token_monitor:
-            await token_monitor.stop()
+        if dependencies.token_monitor:
+            await dependencies.token_monitor.stop()
             
-        if cache:
-            await cache.disconnect()
+        if dependencies.api_cache:
+            await dependencies.api_cache.disconnect()
             
         if dependencies.db_pool:
             await dependencies.db_pool.close()
@@ -145,6 +158,11 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Log startup
+@app.on_event("startup")
+async def log_startup():
+    logger.info(f"FastAPI app started and ready to receive requests on port {os.getenv('PORT', 8000)}")
 
 # CORS middleware
 app.add_middleware(
@@ -195,7 +213,8 @@ app.include_router(batch_router, prefix="/batch", tags=["batch-backtest"])
 @app.get("/health/simple")
 async def simple_health_check():
     """Simple health check that responds immediately"""
-    return {"status": "ok"}
+    # This endpoint must ALWAYS work, even if services are down
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
 
 # Health check
@@ -476,9 +495,13 @@ else:
 # Export for uvicorn
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    port = int(os.getenv("PORT", 8000))
+    
     uvicorn.run(
         "src.web.app:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=settings.ENVIRONMENT == "development"
     )
