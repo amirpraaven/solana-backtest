@@ -280,3 +280,28 @@ class HeliusClient:
                 raise
                 
         return all_transactions
+    
+    @sleep_and_retry
+    @limits(calls=10, period=1)
+    async def get_latest_blockhash(self) -> Optional[Dict]:
+        """Get latest blockhash for API validation"""
+        
+        if not self.session:
+            raise RuntimeError("Session not initialized. Use async context manager.")
+            
+        try:
+            # Use a simple health check endpoint
+            async with self.session.get(
+                f"{self.base_url}/health",
+                params={"api-key": self.api_key}
+            ) as response:
+                # If we get any response, the API key is valid
+                if response.status == 200:
+                    return {"status": "ok"}
+                elif response.status == 401:
+                    raise ValueError("Invalid API key")
+                else:
+                    return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Error checking API health: {e}")
+            raise

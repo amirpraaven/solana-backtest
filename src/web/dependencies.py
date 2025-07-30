@@ -13,6 +13,8 @@ token_tracker = None
 api_cache = None
 strategy_manager = None
 backtest_engine = None
+job_manager = None
+token_monitor = None
 
 async def get_db() -> asyncpg.Pool:
     """Get database connection pool"""
@@ -82,3 +84,15 @@ async def get_job_executor():
         strategy_manager=strategy_manager,
         db_pool=db_pool
     )
+
+def get_job_manager():
+    """Get job manager"""
+    if not job_manager:
+        raise RuntimeError("Job manager not initialized")
+    return job_manager
+
+def get_token_monitor():
+    """Get token monitor"""
+    if not token_monitor:
+        raise RuntimeError("Token monitor not initialized")
+    return token_monitor

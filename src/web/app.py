@@ -98,8 +98,16 @@ async def lifespan(app: FastAPI):
             dependencies.redis_client
         )
         
+        # Initialize job manager
+        from src.engine.job_manager import JobManager
+        dependencies.job_manager = JobManager(
+            dependencies.redis_client,
+            dependencies.db_pool
+        )
+        
         # Start token monitor
-        # asyncio.create_task(token_monitor.start())
+        dependencies.token_monitor = token_monitor
+        asyncio.create_task(token_monitor.start())
         
         logger.info("Application startup complete")
         
@@ -171,12 +179,14 @@ from .routes import router as general_router
 from .strategy_routes import router as strategy_router
 from .token_routes import router as token_router
 from .sample_data_routes import router as sample_router
+from .sync_routes import router as sync_router
 
 # Include routers
 app.include_router(general_router)
 app.include_router(strategy_router, prefix="/strategies", tags=["strategies"])
 app.include_router(token_router, prefix="/tokens", tags=["tokens"])
 app.include_router(sample_router, prefix="/sample-data", tags=["sample-data"])
+app.include_router(sync_router, prefix="/sync", tags=["data-sync"])
 
 
 # Simple health check for Railway - MUST be before static files mount
@@ -249,6 +259,158 @@ async def debug_frontend():
         "files": files,
         "working_dir": os.getcwd()
     }
+
+
+# API validation endpoint
+@app.get("/api/validate")
+async def validate_apis():
+    """Validate API keys and connectivity"""
+    
+    validation_results = {
+        "helius": {
+            "configured": False,
+            "valid": False,
+            "error": None
+        },
+        "birdeye": {
+            "configured": False,
+            "valid": False,
+            "error": None
+        }
+    }
+    
+    # Check Helius API
+    if dependencies.helius_client and dependencies.helius_client.api_key:
+        validation_results["helius"]["configured"] = True
+        try:
+            # Test with a simple request
+            async with dependencies.helius_client:
+                # Get recent Solana slot to test API
+                test_result = await dependencies.helius_client.get_latest_blockhash()
+                if test_result:
+                    validation_results["helius"]["valid"] = True
+        except Exception as e:
+            validation_results["helius"]["error"] = str(e)
+    
+    # Check Birdeye API
+    if dependencies.birdeye_client and dependencies.birdeye_client.api_key:
+        validation_results["birdeye"]["configured"] = True
+        try:
+            # Test with a simple request for USDC token
+            async with dependencies.birdeye_client:
+                test_result = await dependencies.birdeye_client.get_token_overview(
+                    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC
+                )
+                if test_result:
+                    validation_results["birdeye"]["valid"] = True
+        except Exception as e:
+            validation_results["birdeye"]["error"] = str(e)
+    
+    # Add summary
+    all_valid = all(
+        api["configured"] and api["valid"] 
+        for api in validation_results.values()
+    )
+    
+    return {
+        "status": "ready" if all_valid else "incomplete",
+        "apis": validation_results,
+        "message": "All APIs are configured and working" if all_valid else "Some APIs are not configured or failing"
+    }
+
+
+# System status endpoint - shows real data availability
+@app.get("/system/status")
+async def system_status():
+    """Get comprehensive system status including real data availability"""
+    
+    status = {
+        "mode": "real_data" if dependencies.helius_client and dependencies.helius_client.api_key else "demo_data",
+        "apis": {},
+        "data_stats": {},
+        "services": {}
+    }
+    
+    # Check API status
+    if dependencies.helius_client and dependencies.helius_client.api_key:
+        status["apis"]["helius"] = {
+            "configured": True,
+            "api_key_length": len(dependencies.helius_client.api_key)
+        }
+    else:
+        status["apis"]["helius"] = {"configured": False}
+    
+    if dependencies.birdeye_client and dependencies.birdeye_client.api_key:
+        status["apis"]["birdeye"] = {
+            "configured": True,
+            "api_key_length": len(dependencies.birdeye_client.api_key)
+        }
+    else:
+        status["apis"]["birdeye"] = {"configured": False}
+    
+    # Get data statistics
+    if dependencies.db_pool:
+        try:
+            async with dependencies.db_pool.acquire() as conn:
+                # Token count
+                token_count = await conn.fetchval(
+                    "SELECT COUNT(DISTINCT token_address) FROM token_metadata"
+                )
+                
+                # Transaction stats
+                tx_stats = await conn.fetchrow("""
+                    SELECT 
+                        COUNT(*) as total_transactions,
+                        COUNT(DISTINCT token_address) as unique_tokens,
+                        MIN(time) as oldest_transaction,
+                        MAX(time) as newest_transaction
+                    FROM transactions
+                """)
+                
+                # Pool state stats
+                pool_stats = await conn.fetchrow("""
+                    SELECT 
+                        COUNT(*) as total_states,
+                        COUNT(DISTINCT token_address) as tokens_tracked
+                    FROM pool_states
+                """)
+                
+                status["data_stats"] = {
+                    "tokens": {
+                        "total": token_count,
+                        "with_transactions": tx_stats["unique_tokens"] if tx_stats else 0
+                    },
+                    "transactions": dict(tx_stats) if tx_stats else {},
+                    "pool_states": dict(pool_stats) if pool_stats else {}
+                }
+        except Exception as e:
+            status["data_stats"]["error"] = str(e)
+    
+    # Check services
+    status["services"]["token_monitor"] = {
+        "enabled": dependencies.token_monitor is not None,
+        "status": "running" if dependencies.token_monitor else "disabled"
+    }
+    
+    status["services"]["job_manager"] = {
+        "enabled": dependencies.job_manager is not None
+    }
+    
+    # Add recommendations
+    if status["mode"] == "demo_data":
+        status["recommendations"] = [
+            "Add HELIUS_API_KEY to environment for real Solana transaction data",
+            "Add BIRDEYE_API_KEY to environment for real token price/liquidity data",
+            "Use /sync/token/{address} endpoint to sync real data once APIs are configured"
+        ]
+    else:
+        status["recommendations"] = [
+            "Use /tokens/trending to discover real-time trending tokens",
+            "Use /sync/token/{address} to sync historical data for any token",
+            "Monitor /sync/active to track ongoing data synchronization"
+        ]
+    
+    return status
 
 
 # Metrics endpoint

@@ -296,3 +296,172 @@ class BirdeyeClient:
         except aiohttp.ClientError as e:
             logger.error(f"Error fetching pool info: {e}")
             return {}
+    
+    @sleep_and_retry
+    @limits(calls=50, period=1)
+    async def get_trending_tokens(
+        self,
+        time_frame: str = "24h",
+        sort_by: str = "volume",
+        limit: int = 50
+    ) -> Dict:
+        """Get trending tokens based on various metrics"""
+        
+        if not self.session:
+            raise RuntimeError("Session not initialized. Use async context manager.")
+        
+        # Map sort_by to Birdeye API parameters
+        sort_map = {
+            'volume': 'v24hUSD',
+            'price_change': 'v24hChangePercent', 
+            'trades': 'trade24h',
+            'liquidity': 'liquidity'
+        }
+        
+        try:
+            async with self.session.get(
+                f"{self.base_url}/defi/tokenlist",
+                params={
+                    'sort_by': sort_map.get(sort_by, 'v24hUSD'),
+                    'sort_type': 'desc',
+                    'limit': limit,
+                    'min_liquidity': 1000  # Filter out very low liquidity tokens
+                }
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                # Enhance token data
+                tokens = []
+                for token in data.get('data', {}).get('tokens', []):
+                    tokens.append({
+                        'address': token.get('address'),
+                        'symbol': token.get('symbol'),
+                        'name': token.get('name'),
+                        'price': token.get('price', 0),
+                        'priceChange24h': token.get('priceChange24hPercent', 0),
+                        'volume24h': token.get('v24hUSD', 0),
+                        'liquidity': token.get('liquidity', 0),
+                        'mc': token.get('mc', 0),
+                        'holder': token.get('holder', 0),
+                        'trade24h': token.get('trade24h', 0),
+                        'createdAt': token.get('createdAt')
+                    })
+                
+                return {'data': tokens}
+                
+        except aiohttp.ClientError as e:
+            logger.error(f"Error fetching trending tokens: {e}")
+            raise
+    
+    @sleep_and_retry
+    @limits(calls=50, period=1)
+    async def get_new_tokens(
+        self,
+        from_time: datetime,
+        limit: int = 100
+    ) -> Dict:
+        """Get newly created tokens from a specific time"""
+        
+        if not self.session:
+            raise RuntimeError("Session not initialized. Use async context manager.")
+        
+        try:
+            # Get new tokens by sorting by creation time
+            async with self.session.get(
+                f"{self.base_url}/defi/tokenlist",
+                params={
+                    'sort_by': 'createdAt',
+                    'sort_type': 'desc',
+                    'limit': limit,
+                    'min_liquidity': 100  # Basic liquidity filter
+                }
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                # Filter by creation time
+                tokens = []
+                for token in data.get('data', {}).get('tokens', []):
+                    if token.get('createdAt'):
+                        created_at = datetime.fromisoformat(token['createdAt'].replace('Z', '+00:00'))
+                        if created_at >= from_time:
+                            tokens.append({
+                                'address': token.get('address'),
+                                'symbol': token.get('symbol'),
+                                'name': token.get('name'),
+                                'createdAt': token.get('createdAt'),
+                                'price': token.get('price', 0),
+                                'volume24h': token.get('v24hUSD', 0),
+                                'liquidity': token.get('liquidity', 0),
+                                'mc': token.get('mc', 0),
+                                'holder': token.get('holder', 0),
+                                'dex': token.get('dex', 'unknown'),
+                                'poolAddress': token.get('poolAddress')
+                            })
+                
+                return {'data': tokens}
+                
+        except aiohttp.ClientError as e:
+            logger.error(f"Error fetching new tokens: {e}")
+            raise
+    
+    @sleep_and_retry
+    @limits(calls=50, period=1)
+    async def search_tokens(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> Dict:
+        """Search tokens by symbol or address"""
+        
+        if not self.session:
+            raise RuntimeError("Session not initialized. Use async context manager.")
+        
+        try:
+            # If query looks like an address (44 chars), search by address
+            if len(query) == 44:
+                token_data = await self.get_token_overview(query)
+                if token_data:
+                    return {'data': [token_data]}
+                else:
+                    return {'data': []}
+            
+            # Otherwise search by symbol - get token list and filter
+            async with self.session.get(
+                f"{self.base_url}/defi/tokenlist",
+                params={
+                    'sort_by': 'v24hUSD',
+                    'sort_type': 'desc',
+                    'limit': 200  # Get more to filter
+                }
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                # Filter by symbol match
+                tokens = []
+                query_upper = query.upper()
+                for token in data.get('data', {}).get('tokens', []):
+                    if (token.get('symbol', '').upper().startswith(query_upper) or 
+                        query_upper in token.get('symbol', '').upper()):
+                        tokens.append({
+                            'address': token.get('address'),
+                            'symbol': token.get('symbol'),
+                            'name': token.get('name'),
+                            'price': token.get('price', 0),
+                            'volume24h': token.get('v24hUSD', 0),
+                            'liquidity': token.get('liquidity', 0),
+                            'mc': token.get('mc', 0),
+                            'decimals': token.get('decimals', 9),
+                            'logoURI': token.get('logoURI')
+                        })
+                        
+                        if len(tokens) >= limit:
+                            break
+                
+                return {'data': tokens}
+                
+        except aiohttp.ClientError as e:
+            logger.error(f"Error searching tokens: {e}")
+            raise
